@@ -41,6 +41,16 @@ def find_existing_page(data_source_id, canvas_id):
     return result["results"][0] if result["results"] else None
 
 
+def build_canvas_link(html_url):
+    # La Planner API a veces devuelve una ruta relativa (ej. "/courses/297/assignments/2447")
+    # en vez de una URL absoluta. Sin el dominio, Notion no la reconoce como link clickeable.
+    if not html_url:
+        return None
+    if html_url.startswith("http://") or html_url.startswith("https://"):
+        return html_url
+    return f"https://{CANVAS_DOMAIN}{html_url}"
+
+
 def upsert_item(data_source_id, item):
     plannable = item.get("plannable") or {}
     canvas_id = f'{item["plannable_type"]}-{item["plannable_id"]}'
@@ -50,7 +60,7 @@ def upsert_item(data_source_id, item):
         "Type": {"select": {"name": item["plannable_type"].replace("_", " ").title()}},
         "Course": {"select": {"name": item.get("context_name") or "General"}},
         "Canvas ID": {"rich_text": [{"text": {"content": canvas_id}}]},
-        "Canvas Link": {"url": item.get("html_url")},
+        "Canvas Link": {"url": build_canvas_link(item.get("html_url"))},
     }
     if item.get("plannable_date"):
         properties["Due Date"] = {"date": {"start": item["plannable_date"]}}
