@@ -1,2 +1,2 @@
 requests
-notion-client
+notion-client>=3.0

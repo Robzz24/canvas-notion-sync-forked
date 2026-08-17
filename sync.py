@@ -11,6 +11,13 @@ NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 notion = Client(auth=NOTION_TOKEN)
 
 
+def get_data_source_id():
+    # Notion's API separates a "database" from its "data source" (a database
+    # can have multiple sources). Queries/creates go through the data source.
+    database = notion.databases.retrieve(database_id=NOTION_DATABASE_ID)
+    return database["data_sources"][0]["id"]
+
+
 def fetch_planner_items():
     url = f"https://{CANVAS_DOMAIN}/api/v1/planner/items"
     headers = {"Authorization": f"Bearer {CANVAS_TOKEN}"}
@@ -26,15 +33,15 @@ def fetch_planner_items():
     return items
 
 
-def find_existing_page(canvas_id):
-    result = notion.databases.query(
-        database_id=NOTION_DATABASE_ID,
+def find_existing_page(data_source_id, canvas_id):
+    result = notion.data_sources.query(
+        data_source_id=data_source_id,
         filter={"property": "Canvas ID", "rich_text": {"equals": str(canvas_id)}},
     )
     return result["results"][0] if result["results"] else None
 
 
-def upsert_item(item):
+def upsert_item(data_source_id, item):
     plannable = item.get("plannable") or {}
     canvas_id = f'{item["plannable_type"]}-{item["plannable_id"]}'
 
@@ -48,20 +55,24 @@ def upsert_item(item):
     if item.get("plannable_date"):
         properties["Due Date"] = {"date": {"start": item["plannable_date"]}}
 
-    existing = find_existing_page(canvas_id)
+    existing = find_existing_page(data_source_id, canvas_id)
     if existing:
         notion.pages.update(page_id=existing["id"], properties=properties)
         print(f"Actualizado: {properties['Name']['title'][0]['text']['content']}")
     else:
-        notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
+        notion.pages.create(
+            parent={"type": "data_source_id", "data_source_id": data_source_id},
+            properties=properties,
+        )
         print(f"Creado: {properties['Name']['title'][0]['text']['content']}")
 
 
 def main():
+    data_source_id = get_data_source_id()
     items = fetch_planner_items()
     print(f"{len(items)} items encontrados en Canvas Planner")
     for item in items:
-        upsert_item(item)
+        upsert_item(data_source_id, item)
 
 
 if __name__ == "__main__":
