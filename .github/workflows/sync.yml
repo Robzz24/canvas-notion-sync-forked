@@ -1,5 +1,4 @@
 name: Sync Canvas to Notion
-
 on:
   schedule:
     - cron: "0 */3 * * *"  # cada 3 horas
