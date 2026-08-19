@@ -12,6 +12,7 @@ Guía completa: ver el post "Canvas + Notion: guía de sincronización" en Notio
    - `CANVAS_TOKEN` — tu Canvas Access Token (Account → Settings → New Access Token)
    - `NOTION_TOKEN` — el Internal Integration Secret de tu integración de Notion
    - `NOTION_DATABASE_ID` — el ID de tu base de datos "Canvas Sync" en Notion
+   - `ARCHIVE_OVERDUE_AFTER_DAYS` (opcional) — días de gracia antes de archivar tareas vencidas sin completar. Default: `30`.
 3. Confirma que la base de datos de Notion tenga estas propiedades: `Name` (title), `Course` (select), `Type` (select), `Due Date` (date), `Status` (status), `Canvas Link` (url), `Canvas ID` (rich text).
 4. Confirma que tu integración de Notion esté conectada a esa base de datos (`···` → Connections).
 5. Ve a la pestaña **Actions** del repo y corre el workflow "Sync Canvas to Notion" manualmente (`Run workflow`) para probarlo.
@@ -31,4 +32,5 @@ python sync.py
 
 - Llama a `GET /api/v1/planner/items` de Canvas, que agrupa tareas, quizzes, discusiones con fecha y eventos de calendario en una sola respuesta paginada.
 - Por cada item, hace upsert en Notion usando `Canvas ID` (`plannable_type-plannable_id`) como llave para evitar duplicados en corridas repetidas.
+- Al final de cada corrida, archiva (Notion `archived: true`, recuperable desde la papelera) las tareas vencidas: de inmediato si ya están en `Done`, o después de `ARCHIVE_OVERDUE_AFTER_DAYS` días si nunca se marcaron como completadas.
 - Es de un solo sentido: Canvas → Notion. Notion nunca escribe de vuelta a Canvas.
