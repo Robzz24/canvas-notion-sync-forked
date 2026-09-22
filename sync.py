@@ -32,6 +32,23 @@ MODULE_RESOURCE_TYPE_LABELS = {
 notion = Client(auth=NOTION_TOKEN)
 
 
+def get_database_properties():
+    database = notion.databases.retrieve(database_id=NOTION_DATABASE_ID)
+    return database.get("properties", {})
+
+
+def filter_properties_for_database(properties):
+    db_properties = get_database_properties()
+    valid_names = set(db_properties.keys())
+    filtered = {}
+    for key, value in properties.items():
+        if key in valid_names:
+            filtered[key] = value
+        else:
+            print(f"Ignorando propiedad no existente en Notion: {key}")
+    return filtered
+
+
 def get_data_source_id():
     # Notion's API separates a "database" from its "data source" (a database
     # can have multiple sources). Queries/creates go through the data source.
@@ -127,6 +144,9 @@ def format_grade(score, points_possible, letter):
 
 
 def find_existing_page(data_source_id, canvas_id):
+    properties = get_database_properties()
+    if "Canvas ID" not in properties:
+        return None
     result = notion.data_sources.query(
         data_source_id=data_source_id,
         filter={"property": "Canvas ID", "rich_text": {"equals": str(canvas_id)}},
@@ -198,8 +218,9 @@ def upsert_item(data_source_id, item, assignment_grades):
                 ]
             }
 
+    properties = filter_properties_for_database(properties)
     existing = find_existing_page(data_source_id, canvas_id)
-    name = properties["Name"]["title"][0]["text"]["content"]
+    name = properties.get("Name", {"title": [{"text": {"content": "Sin título"}}]})["title"][0]["text"]["content"]
 
     if existing:
         notion_done = get_notion_status(existing) == "Done"
@@ -208,11 +229,12 @@ def upsert_item(data_source_id, item, assignment_grades):
             mark_canvas_complete(item)
         elif canvas_complete and not notion_done:
             # Canvas -> Notion: se marcó como hecho desde el To-Do de Canvas.
-            properties["Status"] = {"status": {"name": "Done"}}
+            if "Status" in get_database_properties():
+                properties["Status"] = {"status": {"name": "Done"}}
         notion.pages.update(page_id=existing["id"], properties=properties)
         print(f"Actualizado: {name}")
     else:
-        if canvas_complete:
+        if canvas_complete and "Status" in get_database_properties():
             properties["Status"] = {"status": {"name": "Done"}}
         notion.pages.create(
             parent={"type": "data_source_id", "data_source_id": data_source_id},
@@ -236,8 +258,9 @@ def upsert_announcement(data_source_id, announcement, course_names):
     if announcement.get("posted_at"):
         properties["Due Date"] = {"date": {"start": announcement["posted_at"]}}
 
+    properties = filter_properties_for_database(properties)
     existing = find_existing_page(data_source_id, canvas_id)
-    name = properties["Name"]["title"][0]["text"]["content"]
+    name = properties.get("Name", {"title": [{"text": {"content": "Sin título"}}]})["title"][0]["text"]["content"]
 
     if existing:
         notion.pages.update(page_id=existing["id"], properties=properties)
@@ -262,8 +285,9 @@ def upsert_module_resource(data_source_id, course_id, item, course_names):
         "Canvas Link": {"url": build_canvas_link(link)},
     }
 
+    properties = filter_properties_for_database(properties)
     existing = find_existing_page(data_source_id, canvas_id)
-    name = properties["Name"]["title"][0]["text"]["content"]
+    name = properties.get("Name", {"title": [{"text": {"content": "Sin título"}}]})["title"][0]["text"]["content"]
 
     if existing:
         notion.pages.update(page_id=existing["id"], properties=properties)
@@ -297,6 +321,7 @@ def upsert_course_grade(data_source_id, course_id, course_name, course_grades):
         "Grade": {"rich_text": [{"text": {"content": text}}]},
     }
 
+    properties = filter_properties_for_database(properties)
     existing = find_existing_page(data_source_id, canvas_id)
 
     if existing:
