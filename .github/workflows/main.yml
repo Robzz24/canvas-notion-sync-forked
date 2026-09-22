@@ -1,0 +1,22 @@
+name: Sync Canvas to Notion
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # cada 3 horas
+  workflow_dispatch: {}      # botón para correrlo manualmente
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python sync.py
+        env:
+          CANVAS_DOMAIN: ${{ secrets.CANVAS_DOMAIN }}
+          CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
