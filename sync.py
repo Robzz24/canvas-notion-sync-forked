@@ -41,10 +41,8 @@ def get_database_properties():
     global _database_properties
 
     if _database_properties is None:
-        data_source = notion.data_sources.retrieve(
-            data_source_id=get_data_source_id()
-        )
-        _database_properties = data_source.get("properties", {})
+        database = notion.databases.retrieve(database_id=NOTION_DATABASE_ID)
+        _database_properties = database.get("properties", {})
         print(
             "Propiedades de Notion detectadas: "
             f"{', '.join(_database_properties) or '(ninguna)'}"
@@ -67,6 +65,10 @@ def property_name(*names, property_type=None):
             if definition.get("type") == property_type:
                 return name
 
+    for name in names:
+        if name in props:
+            return name
+
     return None
 
 
@@ -84,6 +86,9 @@ def select_option_name(prop, preferred):
         "Assignment": ("Assignment", "Tarea"),
         "Announcement": ("Announcement", "Anuncio"),
         "Course Grade": ("Course Grade", "Nota general", "Calificación"),
+        "Sin empezar": ("Sin empezar", "To do", "No started"),
+        "En curso": ("En curso", "In progress"),
+        "Listo": ("Listo", "Done", "Completed"),
     }
 
     for candidate in aliases.get(preferred, ()):
@@ -239,8 +244,7 @@ def build_canvas_link(value):
 
 
 def find_existing_page(data_source_id, canvas_id):
-    canvas_property = property_name("Canvas ID", property_type="rich_text")
-
+    canvas_property = property_name("Canvas ID", "Canvas Id", property_type="rich_text")
     if not canvas_property:
         return None
 
@@ -256,11 +260,10 @@ def find_existing_page(data_source_id, canvas_id):
 
 
 def get_notion_status(page):
-    status_property = property_name("Status", property_type="status")
-    status = (
-        page.get("properties", {}).get(status_property) or {}
-    ).get("status")
-
+    status_property = property_name("Status", "Estado", property_type="status")
+    if not status_property:
+        return None
+    status = (page.get("properties", {}).get(status_property) or {}).get("status")
     return status.get("name") if status else None
 
 
@@ -311,68 +314,46 @@ def make_properties(
 ):
     properties = {}
 
-    title_property = property_name(
-        "Name",
-        "Title",
-        "Título",
-        property_type="title",
-    )
+    title_property = property_name("Name", "Title", "Título", "Nombre", property_type="title")
     if title_property:
-        properties[title_property] = {
-            "title": [{"text": {"content": title}}]
-        }
+        properties[title_property] = {"title": [{"text": {"content": title}}]}
+    else:
+        rich_text_prop = property_name("Name", "Title", "Título", "Nombre", property_type="rich_text")
+        if rich_text_prop:
+            properties[rich_text_prop] = {"rich_text": [{"text": {"content": title}}]}
+        else:
+            print(f"No se encontró la propiedad de título. Título omitido: {title}")
 
     type_property = property_name("Type", "Tipo", property_type="select")
     if type_property:
         option = select_option_name(type_property, item_type)
-
         if option:
             properties[type_property] = {"select": {"name": option}}
-        else:
-            print(f"Omitiendo opción no disponible para Type: {item_type}")
 
-    # Course permite opciones nuevas; Notion las crea automáticamente.
     course_property = property_name("Course", "Curso", property_type="select")
     if course_property:
         properties[course_property] = {"select": {"name": course}}
 
-    add_property(
-        properties,
-        "Canvas ID",
-        {"rich_text": [{"text": {"content": canvas_id}}]},
-        "rich_text",
-    )
+    canvas_id_property = property_name("Canvas ID", "Canvas Id", property_type="rich_text")
+    if canvas_id_property:
+        properties[canvas_id_property] = {"rich_text": [{"text": {"content": canvas_id}}]}
 
-    if link:
-        add_property(
-            properties,
-            "Canvas Link",
-            {"url": link},
-            "url",
-        )
+    link_property = property_name("Canvas Link", "Canvas URL", property_type="url")
+    if link and link_property:
+        properties[link_property] = {"url": link}
 
-    if due_date:
-        add_property(
-            properties,
-            "Due Date",
-            {"date": {"start": due_date}},
-            "date",
-        )
+    due_property = property_name("Due Date", "Fecha", property_type="date")
+    if due_date and due_property:
+        properties[due_property] = {"date": {"start": due_date}}
 
-    if grade:
-        add_property(
-            properties,
-            "Grade",
-            {"rich_text": [{"text": {"content": grade}}]},
-            "rich_text",
-        )
+    grade_property = property_name("Grade", "Nota", property_type="rich_text")
+    if grade and grade_property:
+        properties[grade_property] = {"rich_text": [{"text": {"content": grade}}]}
 
     if done:
-        status_property = property_name("Status", property_type="status")
-
+        status_property = property_name("Status", "Estado", property_type="status")
         if status_property:
             option = select_option_name(status_property, "Done")
-
             if option:
                 properties[status_property] = {"status": {"name": option}}
 
@@ -384,9 +365,7 @@ def upsert_page(data_source_id, canvas_id, properties, label, item=None):
 
     if existing and item is not None:
         current_done = status_is_done(get_notion_status(existing))
-        canvas_done = bool(
-            (item.get("planner_override") or {}).get("marked_complete")
-        )
+        canvas_done = bool((item.get("planner_override") or {}).get("marked_complete"))
 
         if current_done and not canvas_done:
             mark_canvas_complete(item)
@@ -440,9 +419,7 @@ def upsert_item(data_source_id, item, assignment_grades):
         link=build_canvas_link(item.get("html_url")),
         due_date=item.get("plannable_date"),
         grade=grade_text,
-        done=bool(
-            (item.get("planner_override") or {}).get("marked_complete")
-        ),
+        done=bool((item.get("planner_override") or {}).get("marked_complete")),
     )
 
     upsert_page(data_source_id, canvas_id, properties, title, item)
@@ -483,9 +460,7 @@ def upsert_module_resource(data_source_id, course_id, item, course_names):
         item_type=MODULE_RESOURCE_TYPE_LABELS[item["type"]],
         course=course_names.get(course_id, "General"),
         canvas_id=canvas_id,
-        link=build_canvas_link(
-            item.get("html_url") or item.get("external_url")
-        ),
+        link=build_canvas_link(item.get("html_url") or item.get("external_url")),
     )
 
     upsert_page(data_source_id, canvas_id, properties, title)
@@ -531,8 +506,7 @@ def archive_stale_items(data_source_id):
 
     today = datetime.now(timezone.utc).date().isoformat()
     cutoff = (
-        datetime.now(timezone.utc).date()
-        - timedelta(days=ARCHIVE_OVERDUE_AFTER_DAYS)
+        datetime.now(timezone.utc).date() - timedelta(days=ARCHIVE_OVERDUE_AFTER_DAYS)
     ).isoformat()
 
     stale_filter = {
@@ -554,10 +528,7 @@ def archive_stale_items(data_source_id):
     count = 0
 
     while True:
-        kwargs = {
-            "data_source_id": data_source_id,
-            "filter": stale_filter,
-        }
+        kwargs = {"data_source_id": data_source_id, "filter": stale_filter}
 
         if cursor:
             kwargs["start_cursor"] = cursor
@@ -583,10 +554,7 @@ def archive_stale_items(data_source_id):
 def main():
     data_source_id = get_data_source_id()
     courses = fetch_active_courses()
-    course_names = {
-        course["id"]: course.get("name", "General")
-        for course in courses
-    }
+    course_names = {course["id"]: course.get("name", "General") for course in courses}
     course_ids = list(course_names)
 
     assignment_grades = fetch_assignment_grades(course_ids)
@@ -608,20 +576,10 @@ def main():
     print(f"{len(resources)} recursos de módulos encontrados")
 
     for course_id, item in resources:
-        upsert_module_resource(
-            data_source_id,
-            course_id,
-            item,
-            course_names,
-        )
+        upsert_module_resource(data_source_id, course_id, item, course_names)
 
     for course_id, course_name in course_names.items():
-        upsert_course_grade(
-            data_source_id,
-            course_id,
-            course_name,
-            course_grades,
-        )
+        upsert_course_grade(data_source_id, course_id, course_name, course_grades)
 
     archive_stale_items(data_source_id)
 
